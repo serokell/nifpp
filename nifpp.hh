@@ -46,6 +46,8 @@
 #endif
 #include <cassert>
 #include <cstring>
+#include <functional>
+#include <type_traits>
 
 namespace nifpp
 {
@@ -1146,7 +1148,127 @@ void get_throws(ErlNifEnv *env, ERL_NIF_TERM term, T &t)
     }
 }
 
+template<typename T>
+class module_ {
+  template <typename... Types>
+  struct typelist { static const int n = sizeof...(Types); };
+  template <typename F>
+  struct N : N<decltype(std::function{std::declval<F>()})> {};
+
+  template <typename R, typename... A>
+  struct N<R(T::*)(A...)>
+  { using args = typelist<A...>; };
+  std::string name;
+  ErlNifEntry entry;
+  std::vector<ErlNifFunc> funcs;
+  inline static std::list<std::function<void(ErlNifEnv* env)>> registrations;
+  static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info) {
+    try {
+      for (auto elem : registrations) {
+        elem(env);
+      }
+      *priv_data = new T(Env(env), TERM(load_info));
+    } catch(std::exception & e) {
+      enif_raise_exception(env, nifpp::make(env, e.what()));
+      return 1;
+    }
+    return 0;
+  }
+  static int upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, ERL_NIF_TERM load_info) {
+    // TODO
+    return 1;
+  }
+  static void unload(ErlNifEnv* env, void* priv_data) {
+    T* data = static_cast<T*>(priv_data);
+    delete data;
+    // todo: handle exceptions?
+  }
+  template<auto f, typename ...Filled> inline static
+  ERL_NIF_TERM recursive(Env& env, const ERL_NIF_TERM argv[], typelist<> t, Filled&&... filled) {
+    T* instance = (T*)enif_priv_data(env);
+    try {
+      return instance->handle_errors(env, [&]() -> auto {
+          return env.make_((instance->*f)(std::forward<Filled>(filled)...));
+        });
+    } catch (nifpp::badarg) { return enif_make_badarg(env); }
+  }
+  template<auto f, typename T0, typename ...Empty, typename ...Filled> static inline
+  ERL_NIF_TERM recursive_get(std::true_type constructible, Env& env, const ERL_NIF_TERM argv[], typelist<Empty...>, Filled&&... filled) {
+    T0 a0;
+    nifpp::get_throws(env, argv[0], a0);
+    return recursive<f>(env, &(argv[1]), typelist<Empty...>(), filled..., a0);
+  }
+  template<auto f, typename T0, typename ...Empty, typename ...Filled> static inline
+  ERL_NIF_TERM recursive_get(std::false_type constructible, Env& env, const ERL_NIF_TERM argv[], typelist<Empty...>, Filled&&... filled) {
+    resource_ptr<T0> a0;
+    nifpp::get_throws(env, argv[0], a0);
+    return recursive<f>(env, &(argv[1]), typelist<Empty...>(), filled..., *a0);
+  }
+  template<auto f, typename ...Empty, typename ...Filled> inline static
+  ERL_NIF_TERM recursive(Env& env, const ERL_NIF_TERM argv[], typelist<Env&, Empty...>, Filled&&... filled) {
+    return recursive<f>(env, &(argv[1]), typelist<Empty...>(), filled..., env);
+  }
+  template<auto f, typename T0, typename ...Empty, typename ...Filled> inline static
+  ERL_NIF_TERM recursive(Env& env, const ERL_NIF_TERM argv[], typelist<T0, Empty...>, Filled&&... filled) {
+    typedef typename std::remove_reference<T0>::type A0;
+    // if type isn't constructible with no args, use a resource_ptr instead
+    return recursive_get<f, A0>(std::is_constructible<A0>(), env, argv, typelist<Empty...>(), filled...);
+  }
+  template<auto f> static ERL_NIF_TERM erlang_caller(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    Env e(env);
+    return recursive<f>(e, argv, typename N<decltype(f)>::args{});
+  }
+ public:
+  template<auto f>
+  inline auto&& exports(const char* name, unsigned flags = 0) {
+    ErlNifFunc fun;
+    fun.name = name;
+    fun.flags = flags;
+    fun.arity = N<decltype(f)>::args::n;
+    fun.fptr = &(erlang_caller<f>);
+    funcs.push_back(fun);
+    entry.funcs = funcs.data();
+    entry.num_of_funcs = funcs.size();
+    return *this;
+  }
+  template<typename C>
+  auto&& resource(const char* name) {
+    registrations.push_back([&](ErlNifEnv* env) -> void {
+        nifpp::register_resource<C>(env, nullptr, name);
+    });
+    return *this;
+  }
+ module_(std::string name) : name(name), entry({
+     2, 12,
+       this->name.c_str(),
+       0, // num_of_funcs
+       NULL, // funcs
+       load, NULL, upgrade, unload, // load, reload, upgrade, unload
+       ERL_NIF_VM_VARIANT,
+       1, // dirty sched config
+       sizeof(ErlNifResourceTypeInit)
+   }){
+  }
+  operator const ErlNifEntry*() const { return &entry; }
+};
+enum dirty {
+  IO = ERL_NIF_DIRTY_JOB_CPU_BOUND,
+  CPU = ERL_NIF_DIRTY_JOB_IO_BOUND
+};
+
 
 } // namespace nifpp
 
+#ifdef STATIC_ERLANG_NIF
+#error "static erlang nif not supported :/"
+#endif
+#define NIFPP_INIT(get_entry)                                   \
+ERL_NIF_INIT_PROLOGUE                                           \
+ERL_NIF_INIT_GLOB                                               \
+ERL_NIF_INIT_EXPORT const ErlNifEntry* nif_init(ERL_NIF_INIT_ARGS) {  \
+  const ErlNifEntry* entry = get_entry();                             \
+  ERL_NIF_INIT_BODY;                                            \
+  return entry;                                                 \
+}                                                               \
+ERL_NIF_INIT_EPILOGUE
 #endif // NIFPP_H
