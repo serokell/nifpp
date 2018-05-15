@@ -69,6 +69,38 @@ struct TERM
 
 static_assert(sizeof(TERM)==sizeof(ERL_NIF_TERM), "TERM size does not match ERL_NIF_TERM");
 
+struct Env
+ {
+    ErlNifEnv * const e;
+    const bool allocated = false;
+    Env() : e(enif_alloc_env()), allocated(true) { };
+    explicit Env(ErlNifEnv* e) : e(e), allocated(false) { };
+    ~Env() { if (allocated) enif_free_env(e); }
+    Env(const Env &) = delete;
+    Env & operator=(const Env &) = delete;
+
+    inline operator ErlNifEnv*() const {return e;}
+    inline TERM copy(const TERM& orig) {
+      return TERM(enif_make_copy(e, orig));
+    }
+   inline void clear() {
+     enif_clear_env(*this);
+   }
+   template<typename T>
+   void send_and_clear(Env& sendenv, ErlNifPid& pid, T&& thing) {
+     enif_send(sendenv, &pid, *this, make(*this, std::forward<T>(thing)));
+     clear();
+   }
+   template<typename T>
+   auto inline make_(T&& t) {
+     return make(*this, std::forward<T>(t));
+   }
+   template<typename T>
+   auto inline raise(T&& t) {
+     return enif_raise_exception(*this, make_(std::forward<T>(t)));
+   }
+};
+
 class str_atom: public std::string
 {
 public:
