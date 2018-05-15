@@ -682,6 +682,12 @@ TERM make(ErlNifEnv *env, const resource_ptr<T> &var)
 {
     return TERM(enif_make_resource(env, (void*)var.get()));
 }
+
+template<typename T>
+TERM make(ErlNifEnv *env, const T& ref) {
+  return nifpp::make(env, nifpp::construct_resource<T>(ref));
+}
+
 template<typename T>
 TERM make_resource_binary(ErlNifEnv *env, const resource_ptr<T> &var, const void* data, size_t size)
 {
