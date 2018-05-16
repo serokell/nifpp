@@ -1,4 +1,4 @@
-# nifpp (v2): C++11 Wrapper for Erlang NIF API
+# nifpp (v3): C++11 Wrapper for Erlang NIF API
 
 ## Introduction
 
@@ -8,6 +8,10 @@ Nifpp enhances the Erlang NIF API for C++ by providing:
 - get()/make() support for STL containers tuple, vector, array, list, deque, set, unordered_set, multiset, map, and unordered_map.
 - get()/make() support for nested containers.
 - A resource pointer type so that any type can be easily used as a NIF resource.  Think of it as a std::shared_ptr that the emulator can hold references to.
+- A module wrapper class
+
+### Changes for version 3
+- Module wrapper class. See [examples/nix_store_nif.cpp](./examples/nix_store_nif.cpp).
 
 ### Changes for version 2
 - Patch for erl_nif.h is no longer needed.  The new type nifpp::TERM replaces patch functionality.
@@ -30,12 +34,12 @@ instead write
 All nifpp functions are available in the `nifpp` namespace.  The C API remains available in the global namespace, and it may be mixed with nifpp functions.
 
 
-## C++11 compatibility
-Nifpp was tested with gcc-4.8, but should also work with 4.6 and 4.7.  Activate c++11 support with "--std=c++11".
+## C++17 compatibility
+Nifpp was tested with gcc-7.3, but should also work with any gcc v7 or higher.  Activate c++17 support with "--std=c++17".
 
 I did not tested with clang, but I have no reason to think that it will not work.  Please tell me if there are issues.
 
-I understand that c++11 support in MSVC 2013 is still marginal, so I do not have high hopes of success with that.  Do tell me if it works.
+It should also work in MSVC 19.14.
 
 ## unsigned long, ERL_NIF_TERM, and nifpp::TERM
 
